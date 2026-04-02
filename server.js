@@ -166,7 +166,7 @@ function startLiveUpdates(sessionId) {
       try {
         await client.messages.create({
           body: smsMessage,
-          from: process.env.TWILIO_PHONE_NUMBER,
+          from: '+12603669059', // Your purchased number
           to: c.phone
         });
         console.log(`📡 SMS update #${session.updateCount} sent to ${c.phone}`);
@@ -365,7 +365,7 @@ app.post('/api/sos', async (req, res) => {
   const track = `https://safeher-1fb18.web.app/track.html?id=${sessionId}`;
   const timestamp = new Date().toLocaleString('en-IN');
 
-  const message = `🚨 *SOS EMERGENCY ALERT FROM ${displaySender.toUpperCase()}*\n\n📍 *Live Location:*\n${maps}\n\n📡 *Track Live:*\n${track}\n\n⚠️ *IMMEDIATE STEPS:*\n• Call them NOW\n• Go to their location\n• If unreachable, call 112 (Police)\n• Location updates every 2 min`;
+  const msg = `🚨 *SOS EMERGENCY ALERT FROM ${displaySender.toUpperCase()}*\n\n📍 *Live Location:*\n${maps}\n\n📡 *Track Live:*\n${track}\n\n⚠️ *IMMEDIATE STEPS:*\n• Call them NOW\n• Go to their location\n• If unreachable, call 112 (Police)\n• Location updates every 2 min`;
 
   let totalSent = 0;
   let totalFailed = 0;
@@ -385,16 +385,15 @@ app.post('/api/sos', async (req, res) => {
 
     // 📱 SMS — PRIMARY CHANNEL (most reliable, no opt-in needed)
     try {
-      await client.messages.create({
-        body: message.replace(/[*_~`]/g, ''), // strip markdown for SMS
-        from: process.env.TWILIO_PHONE_NUMBER,
+      const sms = await client.messages.create({
+        body: msg.replace(/[*_~`]/g, ''), // strip markdown for SMS
+        from: '+12603669059', // Your purchased number
         to: c.phone
       });
       smsOk = true;
-      console.log(`✅ SMS sent to ${c.name} (${c.phone})`);
     } catch (err) {
-      console.error(`❌ SMS failed for ${c.phone}:`, err.message);
-      errorMsg = `SMS: ${err.message}`;
+      console.log(`❌ SMS failed for ${c.name}: ${err.message}`);
+      errorMsg += `SMS: ${err.message}`;
     }
 
     // 📞 VOICE CALL — SECONDARY CHANNEL
@@ -402,20 +401,20 @@ app.post('/api/sos', async (req, res) => {
       await client.calls.create({
         url: voiceTwimlUrl,
         to: c.phone,
-        from: process.env.TWILIO_PHONE_NUMBER
+        from: '+12603669059', // Your purchased number
       });
+      console.log(`✅ Call Sent to ${c.name}`);
       callOk = true;
-      console.log(`✅ Call initiated to ${c.name} (${c.phone})`);
     } catch (err) {
-      console.error(`❌ Call failed for ${c.phone}:`, err.message);
-      if (!errorMsg) errorMsg = `Call: ${err.message}`;
+      console.log(`❌ Call failed for ${c.name}: ${err.message}`);
+      if (!errorMsg) errorMsg += ` Call: ${err.message}`;
     }
 
     // 🟢 WHATSAPP — TERTIARY CHANNEL (requires sandbox opt-in: wa.me/14155238886 → "join ...")
     try {
       await client.messages.create({
-        body: message,
-        from: 'whatsapp:+14155238886',
+        body: msg,
+        from: 'whatsapp:+14155238886', // Twilio Sandbox number
         to: `whatsapp:${c.phone}`
       });
       waOk = true;

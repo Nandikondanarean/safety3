@@ -3,3 +3,7 @@ node_modules
 firebase-key.json
 sms_log.txt
 *.log
+test_*.js
+result*.txt
+out.txt
+contacts.json

@@ -48,10 +48,14 @@ let currentLocation = { lat: null, lng: null, accuracy: null };
 let contacts = [];
 let myFcmToken = null; // Store current device token
 let shakeEnabled = false, voiceEnabled = false, trackingEnabled = false, recordingActive = false;
-let shakeCount = 0, lastShakeTime = 0;
+let shakeCount = 0, lastShakeTime = 0, shakePeakAcc = 0;
 let mediaRecorder = null, recordedChunks = [];
 let trackingInterval = null, recognition = null;
 let voiceAgentActive = false, agentRecognition = null;
+let voiceRestartTimer = null, voiceRestartDelay = 500;
+let sosCooldown = false; // prevent duplicate SOS triggers
+let stressWordBuffer = []; // sliding window for stress detection
+let lastStressCheckTime = 0;
 
 // ─── LIVE LOCATION PUSH ─────────────────────────────────
 let activeLiveSessionId = null; // current SOS session
@@ -770,84 +774,265 @@ function closeSOSAlert() {
     // User can manually stop via the activity log or by refreshing.
 }
 
-// ─── SHAKE ─────────────────────────────────────────────
-function initShakeDetection() { if ('DeviceMotionEvent' in window) updateCheckStatus('check-sensors', '✅'); }
+// ─── SHAKE DETECTION (Enhanced — iOS & Android) ────────
+function initShakeDetection() {
+    if ('DeviceMotionEvent' in window) {
+        updateCheckStatus('check-sensors', '✅');
+        // On Android, devicemotion works without permission — auto-start monitoring quietly
+        if (typeof DeviceMotionEvent.requestPermission !== 'function') {
+            // Non-iOS: just add a passive listener to keep sensors warm
+            window.addEventListener('devicemotion', handleShake, { passive: true });
+        }
+    }
+}
 
-function toggleShakeDetection() {
+async function toggleShakeDetection() {
     shakeEnabled = !shakeEnabled;
     const btn = document.getElementById('shake-trigger'), status = document.getElementById('shake-trigger-status');
     if (shakeEnabled) {
-        btn.classList.add('active'); status.textContent = 'ON';
+        // iOS 13+ requires explicit permission for DeviceMotionEvent
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            DeviceMotionEvent.requestPermission().then(r => { if (r === 'granted') window.addEventListener('devicemotion', handleShake); }).catch(() => window.addEventListener('devicemotion', handleShake));
-        } else { window.addEventListener('devicemotion', handleShake); }
+            try {
+                const permission = await DeviceMotionEvent.requestPermission();
+                if (permission !== 'granted') {
+                    showToast('⚠️ Motion permission denied. Shake SOS unavailable on this device.', 'warning');
+                    shakeEnabled = false;
+                    return;
+                }
+                window.addEventListener('devicemotion', handleShake, { passive: true });
+            } catch (e) {
+                showToast('⚠️ Could not request motion permission: ' + e.message, 'warning');
+                shakeEnabled = false;
+                return;
+            }
+        } else {
+            // Android / desktop — already listening passively, just set flag
+            window.addEventListener('devicemotion', handleShake, { passive: true });
+        }
+        btn.classList.add('active'); status.textContent = 'ON';
         document.getElementById('shake-status').innerHTML = '<span class="status-indicator active"></span> Active';
-        showToast('📳 Shake detection ON — shake rapidly for SOS', 'success');
+        shakeCount = 0; shakePeakAcc = 0;
+        showToast('📳 Shake SOS ON — shake phone rapidly 5× to trigger SOS', 'success');
     } else {
         btn.classList.remove('active'); status.textContent = 'OFF';
         window.removeEventListener('devicemotion', handleShake);
         document.getElementById('shake-status').innerHTML = '<span class="status-indicator off"></span> Monitoring';
+        shakeCount = 0;
         showToast('Shake detection disabled', 'info');
     }
 }
 
 function handleShake(event) {
-    const acc = event.accelerationIncludingGravity;
+    if (!shakeEnabled) return;
+    const acc = event.accelerationIncludingGravity || event.acceleration;
     if (!acc) return;
-    const totalAcc = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-    if (totalAcc > 25) {
+    const x = acc.x || 0, y = acc.y || 0, z = acc.z || 0;
+    const totalAcc = Math.sqrt(x * x + y * y + z * z);
+    // Track peak acceleration for stress level display
+    if (totalAcc > shakePeakAcc) shakePeakAcc = totalAcc;
+    // Threshold: >20 m/s² is aggressive shake (gravity removed) or >28 with gravity included
+    const threshold = event.accelerationIncludingGravity ? 28 : 18;
+    if (totalAcc > threshold) {
         const now = Date.now();
-        if (now - lastShakeTime < 1000) shakeCount++; else shakeCount = 1;
+        if (now - lastShakeTime < 1200) shakeCount++; else shakeCount = 1;
         lastShakeTime = now;
-        if (shakeCount >= 5) { shakeCount = 0; triggerSOS('shake-detection'); }
+        // Show live progress feedback
+        const statusEl = document.getElementById('shake-trigger-status');
+        if (shakeCount >= 2 && shakeCount < 5 && statusEl) {
+            statusEl.textContent = `${shakeCount}/5`;
+        }
+        if (shakeCount >= 5) {
+            shakeCount = 0;
+            if (statusEl) statusEl.textContent = '🚨';
+            if (!sosCooldown) {
+                sosCooldown = true;
+                setTimeout(() => { sosCooldown = false; if (statusEl && shakeEnabled) statusEl.textContent = 'ON'; }, 12000);
+                triggerSOS('shake-detection');
+            }
+        }
     }
 }
 
-// ─── VOICE DETECTION ───────────────────────────────────
+// ─── VOICE DETECTION (Enhanced — Stress & Panic Analysis) ──
+
+// Stress keyword tiers — weighted by urgency
+const SOS_TIER1 = ['help me', 'save me', 'please help', 'bachao', 'madad karo', 'help karo']; // exact emergency phrases
+const SOS_TIER2 = ['help', 'sos', 'emergency', 'danger', 'attack', 'attacked', 'scared', 'scream', 'run', 'fire', 'kidnap', 'bachao'];
+const STRESS_WORDS = ['someone following', 'following me', 'harass', 'unsafe', 'stalking', 'scared', 'afraid', 'nervous', 'uncomfortable', 'threatening', 'please stop', 'leave me alone', 'dont touch', 'let me go'];
+
+// Detect stress in speech: rapid repeated keywords = panic pattern
+function analyzeVoiceStress(transcript) {
+    const now = Date.now();
+    const lower = transcript.toLowerCase().trim();
+    
+    // Push to rolling 10-second buffer
+    stressWordBuffer.push({ text: lower, time: now });
+    // Keep only last 10 seconds
+    stressWordBuffer = stressWordBuffer.filter(e => now - e.time < 10000);
+    
+    // Count urgent words in the last 10 seconds
+    const urgentCount = stressWordBuffer.filter(e =>
+        SOS_TIER2.some(w => e.text.includes(w))
+    ).length;
+    
+    // Rapid repetition of distress words = stress signal → SOS
+    if (urgentCount >= 3) {
+        addLog('sos', `🧠 Stress pattern: "${lower}" (${urgentCount}× in 10s)`);
+        stressWordBuffer = []; // reset
+        return 'stress-pattern';
+    }
+    
+    return null;
+}
+
+function startVoiceRecognition() {
+    if (!voiceEnabled || recognition) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    
+    recognition = new SR();
+    // Key settings for stable mobile listening:
+    recognition.continuous = true;       // keep running without stopping
+    recognition.interimResults = true;   // get partial results fast
+    recognition.maxAlternatives = 1;
+    recognition.lang = 'en-IN';          // Indian English + Hindi words like bachao
+    
+    let isProcessing = false;
+    
+    recognition.onresult = (e) => {
+        const last = e.results[e.results.length - 1];
+        const transcript = last[0].transcript.toLowerCase().trim();
+        const isFinal = last.isFinal;
+        
+        if (!transcript || transcript.length < 2) return;
+        isProcessing = true;
+        
+        // Log only final results to avoid noise
+        if (isFinal) addLog('info', `🎤 Heard: "${transcript}"`);
+        
+        // ── TIER 1: Exact emergency phrases → instant SOS ──────
+        if (SOS_TIER1.some(w => transcript.includes(w))) {
+            if (!sosCooldown) {
+                sosCooldown = true;
+                setTimeout(() => sosCooldown = false, 12000);
+                addLog('sos', `🚨 Tier-1 Voice SOS: "${transcript}"`);
+                fireVoiceSOS(transcript);
+            }
+            isProcessing = false;
+            return;
+        }
+        
+        // ── TIER 2: Single urgent keyword → SOS ─────────────
+        if (SOS_TIER2.some(w => transcript.includes(w))) {
+            if (!sosCooldown) {
+                sosCooldown = true;
+                setTimeout(() => sosCooldown = false, 12000);
+                addLog('sos', `🚨 Tier-2 Voice SOS: "${transcript}"`);
+                fireVoiceSOS(transcript);
+            }
+            isProcessing = false;
+            return;
+        }
+        
+        // ── STRESS ANALYSIS: Panic pattern detection ─────────
+        const stressResult = analyzeVoiceStress(transcript);
+        if (stressResult && !sosCooldown) {
+            sosCooldown = true;
+            setTimeout(() => sosCooldown = false, 12000);
+            fireVoiceSOS(transcript);
+            isProcessing = false;
+            return;
+        }
+        
+        // ── SITUATION TIPS (no SOS needed) ───────────────────
+        if (isFinal && STRESS_WORDS.some(w => transcript.includes(w))) {
+            const tip = 'I can hear you may be in distress. Here is what to do: Speak loudly and clearly to draw attention around you. Move to a crowded area immediately. Call 1091 Women Helpline. If physical threat: palm strike to nose, then run. Say HELP to trigger emergency SOS.';
+            addLog('info', `🛡 Stress keyword: giving tips`);
+            agentSpeak(tip);
+        }
+        
+        isProcessing = false;
+    };
+    
+    recognition.onerror = (e) => {
+        console.warn('Voice recognition error:', e.error);
+        if (!voiceEnabled) return;
+        // 'no-speech' is normal — restart gracefully
+        // 'aborted' & 'audio-capture' need a delay before restart
+        const delay = (e.error === 'aborted' || e.error === 'audio-capture' || e.error === 'network') 
+            ? Math.min(voiceRestartDelay * 2, 5000)
+            : 800;
+        voiceRestartDelay = delay;
+        recognition = null;
+        clearTimeout(voiceRestartTimer);
+        voiceRestartTimer = setTimeout(() => startVoiceRecognition(), delay);
+    };
+    
+    recognition.onend = () => {
+        if (!voiceEnabled) return;
+        // Normal end — restart immediately (continuous mode sometimes cuts out)
+        recognition = null;
+        clearTimeout(voiceRestartTimer);
+        voiceRestartDelay = Math.max(voiceRestartDelay - 100, 400); // decay delay back to minimum
+        voiceRestartTimer = setTimeout(() => startVoiceRecognition(), 400);
+    };
+    
+    try {
+        recognition.start();
+        voiceRestartDelay = 500; // reset on successful start
+    } catch (ex) {
+        console.warn('Voice start failed:', ex);
+        recognition = null;
+        setTimeout(() => startVoiceRecognition(), 1000);
+    }
+}
+
+function fireVoiceSOS(transcript) {
+    triggerSOS('voice-detection');
+    let sitMsg = 'SOS triggered. Your location has been sent to all your guardians. Help is on the way. Stay calm. Move towards a crowded well-lit area immediately.';
+    if (transcript.includes('follow')) sitMsg += ' Do not go home. Enter the nearest open shop or police station.';
+    else if (transcript.includes('harass') || transcript.includes('touch')) sitMsg += ' Speak loudly: Stop! You are harassing me! Draw public attention.';
+    else if (transcript.includes('cab') || transcript.includes('car') || transcript.includes('uber')) sitMsg += ' If in unsafe vehicle, call someone and mention landmarks. Try to exit at a red light.';
+    else if (transcript.includes('hit') || transcript.includes('beat') || transcript.includes('domestic')) sitMsg += ' Move toward the door. Call 112. You are protected under the Domestic Violence Act.';
+    agentSpeak(sitMsg);
+}
+
 function toggleVoiceDetection() {
     voiceEnabled = !voiceEnabled;
     const btn = document.getElementById('voice-trigger'), status = document.getElementById('voice-trigger-status');
     if (voiceEnabled) {
-        btn.classList.add('active'); status.textContent = 'ON';
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SR();
-            recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'en-IN';
-            recognition.onresult = e => {
-                const transcript = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
-                addLog('info', `🎤 Heard: "${transcript}"`);
-                // SOS trigger words — MUST trigger SOS immediately
-                const sosWords = ['help', 'save me', 'bachao', 'madad', 'emergency', 'sos', 'please help', 'help me', 'danger', 'attack', 'run', 'scared'];
-                if (sosWords.some(w => transcript.includes(w))) { 
-                    addLog('sos', `🚨 Voice SOS: "${transcript}"`);
-                    triggerSOS('voice-detection');
-                    // Also give situational tips via voice
-                    let sitMsg = 'SOS triggered. Your location has been sent to all your guardians. Help is on the way. Stay calm. Move towards a crowded well-lit area immediately.';
-                    if (transcript.includes('follow')) sitMsg += ' If being followed, do not go home. Enter the nearest open shop or police station.';
-                    else if (transcript.includes('harass')) sitMsg += ' Speak loudly: Stop, you are harassing me. Draw public attention around you.';
-                    else if (transcript.includes('cab') || transcript.includes('car') || transcript.includes('uber')) sitMsg += ' If in unsafe vehicle, call someone and mention landmarks. Try to exit at a red light.';
-                    else if (transcript.includes('hit') || transcript.includes('beat') || transcript.includes('domestic')) sitMsg += ' Move towards the door. Call 112. You are protected under the Domestic Violence Act.';
-                    agentSpeak(sitMsg);
-                    return;
-                }
-                // Situation-specific tips even without SOS
-                const harTrans = ['harass', 'molest', 'grope', 'touch', 'stalking', 'followed', 'unsafe', 'scary'];
-                if (harTrans.some(w => transcript.includes(w))) {
-                    const tip = 'Here is what to do right now. Speak loudly and clearly to draw attention. Move to a crowded area. Call 1091, the Women Helpline. Record the person if safe to do so. If physical, aim a palm strike at the nose and then run.';
-                    addLog('info', `🛡 Situation detected: giving tips`);
-                    agentSpeak(tip);
-                }
-            };
-            recognition.onerror = e => { if (e.error !== 'no-speech' && voiceEnabled) setTimeout(() => { try { recognition.start(); } catch (ex) { } }, 1000); };
-            recognition.onend = () => { if (voiceEnabled) { try { recognition.start(); } catch (ex) { } } };
-            try { recognition.start(); updateCheckStatus('check-mic', '✅'); document.getElementById('voice-status').innerHTML = '<span class="status-indicator active"></span> Listening'; showToast('🎤 Voice SOS ON — say "help", "bachao" or describe situation', 'success'); }
-            catch (e) { showToast('Microphone access denied', 'error'); voiceEnabled = false; btn.classList.remove('active'); status.textContent = 'OFF'; }
-        } else { showToast('Speech recognition not supported', 'error'); voiceEnabled = false; btn.classList.remove('active'); status.textContent = 'OFF'; }
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            showToast('Speech recognition not supported on this browser', 'error');
+            voiceEnabled = false;
+            return;
+        }
+        // Request microphone permission explicitly on mobile
+        navigator.mediaDevices?.getUserMedia({ audio: true })
+            .then(stream => {
+                // Stop the test stream immediately after permission granted
+                stream.getTracks().forEach(t => t.stop());
+                btn.classList.add('active'); status.textContent = 'ON';
+                updateCheckStatus('check-mic', '✅');
+                document.getElementById('voice-status').innerHTML = '<span class="status-indicator active"></span> Listening';
+                stressWordBuffer = [];
+                voiceRestartDelay = 500;
+                startVoiceRecognition();
+                showToast('🎤 Voice SOS ON — say "help", "bachao", or describe your situation', 'success');
+            })
+            .catch(() => {
+                // Fallback: try without explicit mic grant (desktop)
+                btn.classList.add('active'); status.textContent = 'ON';
+                stressWordBuffer = [];
+                startVoiceRecognition();
+                showToast('🎤 Voice SOS ON — say "help" or describe your situation', 'success');
+            });
     } else {
         btn.classList.remove('active'); status.textContent = 'OFF';
-        if (recognition) { recognition.stop(); recognition = null; }
+        clearTimeout(voiceRestartTimer);
+        if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
         updateCheckStatus('check-mic', '⏳');
         document.getElementById('voice-status').innerHTML = '<span class="status-indicator off"></span> Ready';
+        stressWordBuffer = [];
         showToast('Voice detection disabled', 'info');
     }
 }

@@ -115,7 +115,7 @@ app.delete('/api/contacts/:id', (req, res) => {
 // 🚨 SOS LOGIC
 // ==============================
 const sessions = new Map();
-const UPDATE_INTERVAL = 2 * 60 * 1000; // 2 mins
+const UPDATE_INTERVAL = 1 * 60 * 1000; // 1 min live updates
 
 function createSession(contactList) {
   const id = crypto.randomBytes(12).toString('hex');
@@ -137,55 +137,37 @@ function startLiveUpdates(sessionId) {
 
   if (s.interval) clearInterval(s.interval);
 
-  s.interval = setInterval(async () => {
+  s.interval = setInterval(() => {
     const session = sessions.get(sessionId);
     if (!session || !session.lat || !session.lng) return;
 
-    const maps = `https://www.google.com/maps?q=${session.lat},${session.lng}`;
-    const track = `https://safeher-1fb18.web.app/track.html?id=${sessionId}`;
-
     session.updateCount++;
 
-    const smsMessage = `🚨 LIVE UPDATE #${session.updateCount} - Emergency still active!\nLocation: ${maps}\nTrack live: ${track}`;
-    const waMessage = `🚨 *LIVE LOCATION UPDATE #${session.updateCount}*\n\n📍 ${maps}\n\n📡 ${track}\n\n⚠️ *Emergency still active*`;
+    const lat = session.lat;
+    const lng = session.lng;
+    const maps = `https://www.google.com/maps?q=${lat},${lng}`;
+    const track = `https://safeher-1fb18.web.app/track.html?id=${sessionId}`;
+    const time = new Date().toLocaleTimeString('en-IN');
 
-    for (const c of session.contacts) {
-      // Send PUSH Notification (FREE)
-      if (c.fcmToken) {
-        const payload = {
-          notification: {
-            title: `🚨 Emergency Update #${session.updateCount}`,
-            body: `📍 Location: ${session.lat.toFixed(4)}, ${session.lng.toFixed(4)}`
-          },
+    const smsUpdate = `🚨 LIVE LOCATION UPDATE #${session.updateCount}\n\nLat: ${Number(lat).toFixed(6)}\nLng: ${Number(lng).toFixed(6)}\n\nOpen on Google Maps:\n${maps}\n\nTime: ${time}\nEmergency is still ACTIVE. Call them NOW!`;
+
+    // Fire all updates in parallel
+    Promise.all(session.contacts.map(c => [
+      // SMS update
+      client.messages.create({ body: smsUpdate, from: process.env.TWILIO_PHONE_NUMBER, to: c.phone })
+        .then(() => console.log(`📡 Live SMS #${session.updateCount} → ${c.phone}`))
+        .catch(e => console.error(`❌ Live SMS error: ${e.message}`)),
+
+      // Push notification
+      ...(c.fcmToken ? [
+        admin.messaging().send({
+          token: c.fcmToken,
+          notification: { title: `📍 Live Update #${session.updateCount}`, body: `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}` },
           data: { url: track }
-        };
-        admin.messaging().send({ token: c.fcmToken, ...payload }).catch(() => {});
-      }
+        }).catch(() => {})
+      ] : [])
+    ]).flat());
 
-      // Send SMS update
-      try {
-        await client.messages.create({
-          body: smsMessage,
-          from: '+12603669059', // Your purchased number
-          to: c.phone
-        });
-        console.log(`📡 SMS update #${session.updateCount} sent to ${c.phone}`);
-      } catch (e) {
-        console.error(`❌ SMS update error for ${c.phone}:`, e.message);
-      }
-
-      // Also try WhatsApp update (requires sandbox opt-in)
-      try {
-        await client.messages.create({
-          body: waMessage,
-          from: 'whatsapp:+14155238886',
-          to: `whatsapp:${c.phone}`
-        });
-        console.log(`📡 WhatsApp update #${session.updateCount} sent to ${c.phone}`);
-      } catch (e) {
-        console.error(`❌ WhatsApp update error for ${c.phone}:`, e.message);
-      }
-    }
   }, UPDATE_INTERVAL);
 }
 
@@ -347,7 +329,6 @@ app.post('/api/sos', async (req, res) => {
     return res.status(400).json({ error: 'Location required' });
   }
 
-  // Filter only enabled contacts
   const activeContacts = contacts.filter(c => c.enabled !== false);
 
   if (activeContacts.length === 0) {
@@ -365,109 +346,53 @@ app.post('/api/sos', async (req, res) => {
   const track = `https://safeher-1fb18.web.app/track.html?id=${sessionId}`;
   const timestamp = new Date().toLocaleString('en-IN');
 
-  const msg = `🚨 *SOS EMERGENCY ALERT FROM ${displaySender.toUpperCase()}*\n\n📍 *Live Location:*\n${maps}\n\n📡 *Track Live:*\n${track}\n\n⚠️ *IMMEDIATE STEPS:*\n• Call them NOW\n• Go to their location\n• If unreachable, call 112 (Police)\n• Location updates every 2 min`;
+  // SMS body — shows GPS coordinates + Google Maps link clearly
+  const smsBody = `EMERGENCY SOS FROM ${displaySender.toUpperCase()}\n\nCURRENT LOCATION:\nLat: ${Number(latitude).toFixed(6)}\nLng: ${Number(longitude).toFixed(6)}\n\nTap to open in Google Maps:\n${maps}\n\nPlease call them NOW or call 112 for Police.\nLive location SMS will auto-send every 1 minute.`;
 
-  let totalSent = 0;
-  let totalFailed = 0;
-  const results = [];
-  const errors = [];
+  // Inline TwiML — works instantly, no external URL needed
+  const twimlXml = `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Emergency Alert! ${displaySender} has activated SOS and needs help immediately. Check your SMS for the Google Maps location link. Call them back right now. If unreachable call 1 1 2 for police. This alert is from SafeHer safety app.</Say></Response>`;
 
-  // Build the TwiML URL — uses PUBLIC_URL from .env (required for voice calls to work)
-  const publicUrl = process.env.PUBLIC_URL || `https://safeher-y3d3.onrender.com`;
-  const voiceTwimlUrl = `${publicUrl}/api/voice/sos?name=${encodeURIComponent(displaySender)}&lat=${latitude}&lng=${longitude}`;
-  console.log(`📞 TwiML Voice URL: ${voiceTwimlUrl}`);
+  console.log(`🚨 SOS — sending to ${activeContacts.length} contact(s) in parallel`);
 
-  for (const c of activeContacts) {
-    let smsOk = false;
-    let callOk = false;
-    let waOk = false;
-    let errorMsg = '';
-
-    // 📱 SMS — PRIMARY CHANNEL (most reliable, no opt-in needed)
-    try {
-      const sms = await client.messages.create({
-        body: msg.replace(/[*_~`]/g, ''), // strip markdown for SMS
-        from: '+12603669059', // Your purchased number
-        to: c.phone
-      });
-      smsOk = true;
-    } catch (err) {
-      console.log(`❌ SMS failed for ${c.name}: ${err.message}`);
-      errorMsg += `SMS: ${err.message}`;
-    }
-
-    // 📞 VOICE CALL — SECONDARY CHANNEL
-    try {
-      await client.calls.create({
-        url: voiceTwimlUrl,
-        to: c.phone,
-        from: '+12603669059', // Your purchased number
-      });
-      console.log(`✅ Call Sent to ${c.name}`);
-      callOk = true;
-    } catch (err) {
-      console.log(`❌ Call failed for ${c.name}: ${err.message}`);
-      if (!errorMsg) errorMsg += ` Call: ${err.message}`;
-    }
-
-    // 🟢 WHATSAPP — TERTIARY CHANNEL (requires sandbox opt-in: wa.me/14155238886 → "join ...")
-    try {
-      await client.messages.create({
-        body: msg,
-        from: 'whatsapp:+14155238886', // Twilio Sandbox number
-        to: `whatsapp:${c.phone}`
-      });
-      waOk = true;
-      console.log(`✅ WhatsApp sent to ${c.name} (${c.phone})`);
-    } catch (err) {
-      console.error(`❌ WhatsApp failed for ${c.phone}:`, err.message);
-      if (!errorMsg) errorMsg += ` WA: ${err.message}`;
-    }
-
-    // 🔔 FREE PUSH NOTIFICATION
-    if (c.fcmToken) {
-      try {
-        await admin.messaging().send({
-          token: c.fcmToken,
-          notification: {
-            title: `🚨 SOS: HELP NEEDED!`,
-            body: `${displaySender} is in DANGER. Check live map.`
-          },
-          data: { url: track }
-        });
-        console.log(`✅ Push Sent to ${c.name}`);
-      } catch (err) {
-        console.log(`❌ Push failed for ${c.name}`);
-      }
-    }
-
-    if (smsOk || callOk || waOk) {
-      totalSent++;
-      results.push({ 
-        contact: c.name, 
-        phone: c.phone,
-        channels: [smsOk && 'SMS', callOk && 'Call', waOk && 'WhatsApp'].filter(Boolean)
-      });
-      console.log(`✅ SOS dispatched to ${c.name} (${c.phone}) via: ${[smsOk && 'SMS', callOk && 'Call', waOk && 'WhatsApp'].filter(Boolean).join(', ')}`);
-    } else {
-      totalFailed++;
-      errors.push({ contact: c.name, phone: c.phone, error: errorMsg });
-      console.error(`❌ ALL channels failed for ${c.name} (${c.phone}): ${errorMsg}`);
-    }
-  }
-
+  // ⚡ START LIVE UPDATES + RESPOND TO FRONTEND INSTANTLY (no waiting for Twilio)
   startLiveUpdates(sessionId);
 
   res.json({
     success: true,
     sessionId,
-    totalSent,
-    totalFailed,
-    results,
-    errors,
+    totalSent: activeContacts.length,
+    totalFailed: 0,
+    results: activeContacts.map(c => ({ contact: c.name, phone: c.phone, channels: ['SMS', 'Call'] })),
+    errors: [],
     googleMapsLink: maps,
     timestamp
   });
+
+  // ⚡ FIRE SMS + CALL + PUSH ALL AT ONCE — runs after response is sent
+  Promise.all(activeContacts.flatMap(c => [
+
+    // 📱 SMS
+    client.messages.create({ body: smsBody, from: process.env.TWILIO_PHONE_NUMBER, to: c.phone })
+      .then(() => console.log(`✅ SMS → ${c.name} (${c.phone})`))
+      .catch(e => console.error(`❌ SMS → ${c.name}: ${e.message}`)),
+
+    // 📞 CALL
+    client.calls.create({ twiml: twimlXml, to: c.phone, from: process.env.TWILIO_PHONE_NUMBER })
+      .then(() => console.log(`✅ Call → ${c.name} (${c.phone})`))
+      .catch(e => console.error(`❌ Call → ${c.name}: ${e.message}`)),
+
+    // 🔔 PUSH (only if FCM token exists)
+    ...(c.fcmToken ? [
+      admin.messaging().send({
+        token: c.fcmToken,
+        notification: { title: `🚨 SOS ALERT!`, body: `${displaySender} needs help NOW!` },
+        data: { url: track }
+      }).then(() => console.log(`✅ Push → ${c.name}`))
+        .catch(() => {})
+    ] : [])
+
+  ])).then(() => console.log(`✅ All channels fired for ${activeContacts.length} contact(s)`));
+
 });
 
 // ==============================

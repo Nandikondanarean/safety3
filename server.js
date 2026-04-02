@@ -7,11 +7,27 @@ const crypto = require('crypto');
 const fs = require('fs');
 const admin = require('firebase-admin');
 
-// Load Firebase Admin Key
-const serviceAccount = require('./firebase-key.json');
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+// Firebase Admin Initialization
+let serviceAccount;
+if (process.env.FIREBASE_KEY) {
+    try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+        console.log('✅ Firebase Admin initialized via Env Var');
+    } catch (e) {
+        console.error('❌ Failed to parse FIREBASE_KEY Env Var:', e.message);
+    }
+} else if (fs.existsSync('./firebase-key.json')) {
+    serviceAccount = require('./firebase-key.json');
+    console.log('✅ Firebase Admin initialized via local file');
+}
+
+if (serviceAccount) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+} else {
+    console.warn('⚠️ Firebase Admin NOT initialized. Push notifications will not work.');
+}
 
 const app = express();
 app.use(cors({ origin: '*' }));

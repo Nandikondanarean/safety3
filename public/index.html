@@ -30,6 +30,10 @@
     <!-- ═══ Mapping Library (Leaflet) ═══ -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    
+    <!-- ═══ Agora.io Voice/Video SDK ═══ -->
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
 
     <!-- ═══ Service Worker Registration ═══ -->
     <script>
@@ -144,8 +148,6 @@
                 </svg>
                 <div class="loader-pulse"></div>
             </div>
-            <h2 class="loader-text">SAFEHER</h2>
-            <p class="loader-sub">Activating Protection Systems...</p>
             <div class="loader-bar">
                 <div class="loader-progress"></div>
             </div>
@@ -213,10 +215,38 @@
             <a href="#" class="nav-link logout-link" onclick="logout()">Logout</a>
         </div>
         <div class="nav-status">
+            <button id="stealth-mode-btn" class="icon-btn" title="Stealth Mode" onclick="toggleStealthMode()" 
+                    style="margin-right: 15px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; color: var(--text-muted); transition: all 0.3s ease;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                </svg>
+            </button>
             <div class="status-dot" id="status-dot"></div>
             <span id="status-text">Shield Active</span>
         </div>
     </nav>
+
+    <!-- 🗞️ STEALTH NEWS FEED (Ghost UI) -->
+    <div id="stealth-news-ui" class="stealth-news-layer hidden">
+        <header class="news-header" style="background: #fff; padding: 20px; border-bottom: 2px solid #f0f0f0; color: #000; text-align: center;">
+            <div class="news-logo" style="font-family: 'Serif', serif; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.5px;">Global Times</div>
+            <div class="news-date" style="font-size: 0.8rem; color: #666; margin-top: 5px;">Tuesday, April 7, 2026</div>
+        </header>
+        <div class="news-content" style="background: #fff; color: #333; padding: 20px; font-family: 'Serif', serif;">
+            <div class="news-article" style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
+                <div class="news-tag" style="background: #000; color: #fff; display: inline-block; padding: 2px 8px; font-size: 0.7rem; margin-bottom: 10px;">TOP NEWS</div>
+                <h3 style="font-size: 1.4rem; margin-bottom: 10px;">New Economic Policy Announced for Q3</h3>
+                <p style="line-height: 1.6; color: #555;">The treasury has unveiled a comprehensive plan to tackle inflation while promoting local manufacturing growth...</p>
+            </div>
+            <div class="news-article">
+                <div class="news-tag" style="background: #000; color: #fff; display: inline-block; padding: 2px 8px; font-size: 0.7rem; margin-bottom: 10px;">LIFESTYLE</div>
+                <h3 style="font-size: 1.4rem; margin-bottom: 10px;">Sustainable Living: The 2026 Guide</h3>
+                <p style="line-height: 1.6; color: #555;">Discover the latest trends in zero-waste home management and urban gardening that are sweeping the nation...</p>
+            </div>
+        </div>
+        <button onclick="toggleStealthMode()" style="position: fixed; bottom: 0; right: 0; width: 50px; height: 50px; opacity: 0.01;"></button>
+    </div>
 
     <!-- ═══════════════════════════════════════════ -->
     <!-- SECTION: HERO -->
@@ -235,6 +265,23 @@
                 Advanced AI-driven emergency response with real-time GPS, instant SOS alerts,
                 and an intelligent safety advisor — built exclusively for women's safety.
             </p>
+
+            <!-- 🛡️ LIVE SAFETY SCORE METER -->
+            <div class="safety-meter-container" style="margin: 25px 0 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 15px; padding: 15px; text-align: left; display: flex; align-items: center; gap: 15px;">
+                <div class="meter-gauge" style="position: relative; width: 60px; height: 60px;">
+                   <svg viewBox="0 0 36 36" style="width: 100%; height: 100%; transform: rotate(-90deg);">
+                       <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="3" />
+                       <path id="score-meter-path" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#00f5d4" stroke-width="3" stroke-dasharray="85, 100" />
+                   </svg>
+                   <div id="score-text" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: 800; color: #fff; font-size: 0.9rem;">85</div>
+                </div>
+                <div class="meter-info">
+                   <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 2px;">Area Safety Score</div>
+                   <div id="score-status" style="font-size: 1rem; font-weight: 700; color: #00f5d4;">🛡️ ZONE SECURE</div>
+                   <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">Based on community heatmaps + time of day</div>
+                </div>
+            </div>
+
             <div class="hero-stats">
                 <div class="stat-card">
                     <div class="stat-number" id="stat-contacts">0</div>
@@ -264,6 +311,21 @@
                         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                     </svg>
                     Add Guardians
+                </button>
+            </div>
+            
+            <div class="quick-tools-bar" style="margin-top: 30px; display: flex; gap: 15px; justify-content: center;">
+                <button class="tool-btn" onclick="triggerFakeCall()" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 10px 20px; border-radius: 20px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.3s ease;">
+                    <span>📞</span> Fake Call
+                </button>
+                <button class="tool-btn" onclick="toggleSiren()" style="background: rgba(255,133,161,0.1); border: 1px solid rgba(255,133,161,0.2); color: #ff85a1; padding: 10px 20px; border-radius: 20px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.3s ease;">
+                    <span id="siren-icon">📢</span> <span id="siren-text">Panic Siren</span>
+                </button>
+                <button class="tool-btn" onclick="triggerVisualGuardian()" style="background: rgba(199,125,255,0.1); border: 1px solid rgba(199,125,255,0.2); color: #c77dff; padding: 10px 20px; border-radius: 20px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.3s ease;">
+                    <span>👁️</span> AI Witness
+                </button>
+                <button class="tool-btn" onclick="triggerDigitalDecoy()" style="background: rgba(58,134,255,0.1); border: 1px solid rgba(58,134,255,0.2); color: #3a86ff; padding: 10px 20px; border-radius: 20px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.3s ease;">
+                    <span>🎥</span> Meeting Decoy
                 </button>
             </div>
         </div>
@@ -666,6 +728,10 @@
                             <label>Destination</label>
                             <input type="text" id="journey-dest" placeholder="e.g. Home, Office, Mall...">
                         </div>
+                        <div class="journey-input-group" style="flex: 2;">
+                            <label>📞 Call Me (SOS Number)</label>
+                            <input type="tel" id="journey-user-phone" placeholder="+91 91234 56789" style="background: rgba(255, 255, 255, 0.05);">
+                        </div>
                         <div class="journey-input-group journey-mins">
                             <label>Minutes to arrive</label>
                             <div class="mins-picker">
@@ -711,45 +777,77 @@
             <p class="section-subtitle">Help other women by anonymously marking unsafe areas near you</p>
         </div>
 
-        <div class="community-map-wrapper">
-            <div id="community-main-map" class="community-main-map"></div>
-        </div>
-
         <div class="community-container">
-            <!-- Pin an Incident -->
-            <div class="community-pin-card">
-                <h3>📍 Report an Unsafe Area</h3>
-                <p class="community-desc">Your pin is 100% anonymous. It helps women avoid this area.</p>
+            <!-- 1. MAP HERO (FULL WIDTH TOP) -->
+            <div class="community-map-wrapper">
+                <div id="community-main-map" class="community-main-map"></div>
+                
+                <div class="map-legend">
+                    <div class="legend-item"><div class="line-safe"></div> SAFE PATH RECO.</div>
+                    <div class="legend-item"><div class="line-risk"></div> RISK PATH AREA</div>
+                    <div class="legend-item"><div class="circle-safe" style="background: rgba(0,245,212,0.4);"></div> SAFETY HEAT MAP</div>
+                    <div class="legend-item"><div class="circle-risk" style="background: rgba(255,0,110,0.4);"></div> DANGER HEAT MAP</div>
+                </div>
+            </div>
+
+            <!-- 2. ROUTE PLANNER (LEFT) -->
+            <div class="community-pin-card community-route-planning">
+                <h3 style="display: flex; align-items: center; gap: 10px; color: var(--accent-cyan);">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        <path d="M9 12l2 2 4-4" />
+                    </svg>
+                    Safe Journey Planner
+                </h3>
+                <p class="community-desc">Calculate the safest route between your daily hubs.</p>
                 <div class="community-form">
-                    <select id="community-type">
-                        <option value="harassment">😨 Harassment</option>
-                        <option value="stalking">👁️ Stalking / Being Followed</option>
-                        <option value="lighting">🌑 Poor Lighting / Isolated</option>
-                        <option value="assault">⚠️ Physical Threat</option>
-                        <option value="safe">✅ Mark as Safe Zone</option>
-                    </select>
-                    <input type="text" id="community-note" placeholder="Optional note (e.g. 'Avoid after 9PM')">
-                    <button class="community-pin-btn" onclick="pinCommunityAlert()">
-                        📍 Pin at My Current Location
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <input type="text" id="route-home" placeholder="🏠 Start Location (e.g. Delhi, Mumbai...)" value=""
+                            style="background: rgba(0, 245, 212, 0.05); border-color: rgba(0, 245, 212, 0.2);">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <input type="text" id="route-office" placeholder="🏢 Destination (e.g. Bengaluru, Pune...)" value=""
+                            style="background: rgba(199, 125, 255, 0.05); border-color: rgba(199, 125, 255, 0.2);">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="calculateSafetyRoute()" style="background: linear-gradient(135deg, #00f5d4, #00bbff);">
+                        🔍 Calculate Safest Path
                     </button>
                 </div>
             </div>
 
-            <!-- Nearby Reports -->
-            <div class="community-reports-card">
-                <div class="community-reports-header">
-                    <h3>🗺️ Nearby Reports</h3>
-                    <button class="community-refresh-btn" onclick="loadCommunityReports()">↻ Refresh</button>
+            <!-- 3. REPORT PIN (RIGHT) -->
+            <div class="community-pin-card">
+                <h3>📍 Report Incident</h3>
+                <p class="community-desc">Help others stay safe. Fully anonymous.</p>
+                <div class="community-form">
+                    <select id="community-type">
+                        <option value="harassment">😨 Harassment</option>
+                        <option value="stalking">👁️ Stalking</option>
+                        <option value="lighting">🌑 Poor Lighting</option>
+                        <option value="assault">⚠️ Threat</option>
+                        <option value="safe">✅ Safe Zone</option>
+                    </select>
+                    <input type="text" id="community-note" placeholder="Add a quick note...">
+                    <button class="community-pin-btn" onclick="pinCommunityAlert()">
+                        📍 Pin Location
+                    </button>
                 </div>
-                <div id="community-reports-list" class="community-reports-list">
-                    <div class="community-empty">Loading nearby reports...</div>
-                </div>
-                <p class="community-disclaimer">All pins are anonymous. Reports older than 30 days are removed automatically.</p>
             </div>
 
-            <!-- Heat summary -->
-            <div class="community-stats-card">
-                <h3>📊 Area Safety Summary</h3>
+            <!-- 4. RECENT ACTIVITY (FULL WIDTH BOTTOM) -->
+            <div class="community-reports-card" style="grid-column: 1 / -1;">
+                <div class="community-reports-header">
+                    <h3>🗺️ Recent Safety Reports</h3>
+                    <button class="community-refresh-btn" onclick="loadCommunityReports()">↻ Refresh</button>
+                </div>
+                <div id="community-reports-list" class="community-reports-list" style="max-height: 400px;">
+                    <div class="community-empty">Loading nearby reports...</div>
+                </div>
+            </div>
+
+            <!-- 5. STATS (FULL WIDTH BOTTOM) -->
+            <div class="community-stats-card" style="grid-column: 1 / -1; margin-top: 20px;">
+                <h3 style="color: var(--accent-pink); margin-bottom: 20px; font-family: var(--font-display); letter-spacing: 2px;">📊 Area Safety Summary</h3>
                 <div class="community-stats-grid">
                     <div class="cstat"><span id="cstat-total">0</span><label>Total Pins</label></div>
                     <div class="cstat"><span id="cstat-danger">0</span><label>Danger Zones</label></div>
@@ -941,11 +1039,48 @@
                     </div>
                     <div class="setting-item">
                         <div class="setting-info">
-                            <span>Acoustic Detection</span>
-                            <p>SOS on shouts or high-stress audio</p>
+                            <span>Secret SOS Phrase</span>
+                            <p>Benign phrase to trigger SOS via Voice AI</p>
+                        </div>
+                        <input type="text" id="secret-voice-phrase" placeholder="e.g. I am almost home" onblur="saveAdvancedConfig()">
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <span>Shake detection (SOS)</span>
+                            <p>Rapidly shake phone 3 times to trigger SOS</p>
                         </div>
                         <label class="switch">
-                            <input type="checkbox" id="acoustic-toggle" onchange="toggleAcousticDetection()">
+                            <input type="checkbox" id="shake-toggle" onchange="toggleShakeDetection()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <span>Scream Detection (SOS)</span>
+                            <p>Auto-SOS on loud screams or high-stress audio</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="acoustic-toggle" onchange="toggleScreamDetection()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <span>Battery Low-Alert</span>
+                            <p>Auto-send SOS to guardians at 15% battery</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="battery-toggle" onchange="toggleBatteryAlert()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <span>Geofence Danger Warnings</span>
+                            <p>Alert me when near community-reported danger zones</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="geofence-toggle" onchange="toggleGeofenceAlerts()">
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -1280,6 +1415,12 @@
             <div class="sos-alert-female">♀</div>
             <h2>🚨 SOS ACTIVATED</h2>
             <p id="sos-alert-msg">Fetching your live GPS location...</p>
+            
+            <!-- 📹 LIVE VIDEO STREAM PREVIEW -->
+            <div id="local-video-container" class="sos-video-preview">
+                <div class="video-overlay-text">LIVE BROADCASTING...</div>
+            </div>
+
             <div class="sos-alert-progress">
                 <div class="sos-alert-bar" id="sos-alert-bar"></div>
             </div>
@@ -1334,11 +1475,77 @@
     </nav>
     </div> <!-- End #app-content -->
 
+    <!-- Journey Check-In Modal (Auto-SOS) -->
+    <div id="journey-check-in-modal" class="incident-modal-overlay hidden" style="z-index: 10001;">
+        <div class="incident-modal-card" style="max-width: 400px; text-align: center; padding: 30px;">
+            <div class="sos-alert-pulse" style="margin: 0 auto 20px;"></div>
+            <h2 style="color: var(--accent-rose); margin-bottom: 10px;">Are You Safe?</h2>
+            <p style="margin-bottom: 20px;">Your journey timer has expired. Please check in to prevent an automatic SOS alert.</p>
+            
+            <div id="check-in-countdown" style="font-size: 48px; font-weight: 800; margin-bottom: 20px; font-family: monospace; color: var(--accent-rose);">5</div>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-primary" onclick="confirmJourneySafety()" style="width: 100%; padding: 15px; font-size: 1.1rem; background: linear-gradient(135deg, #00f5d4, #00bbff); border: none;">✅ I AM SAFE</button>
+                <button class="btn btn-secondary" onclick="triggerSOSNow()" style="width: 100%; border-color: var(--accent-rose); color: var(--accent-rose);">🚨 TRIGGER SOS NOW</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📞 REALISTIC FAKE CALL INTERFACE -->
+    <div id="fake-call-interface" class="fake-call-overlay hidden">
+        <div class="fake-call-bg"></div>
+        <div class="caller-info">
+            <div class="caller-name">Mom</div>
+            <div class="caller-status">Incoming Call...</div>
+        </div>
+        <div class="call-actions">
+            <div class="call-btn" onclick="endFakeCall()">
+                <div class="btn-circle btn-decline">✕</div>
+                <span>Decline</span>
+            </div>
+            <div class="call-btn" onclick="acceptFakeCall()">
+                <div class="btn-circle btn-accept">📞</div>
+                <span>Accept</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📢 EMERGENCY SIREN FLASH -->
+    <div id="siren-overlay" class="siren-overlay"></div>
+
+    <!-- 🎥 DIGITAL DECOY (FAKE MEETING) -->
+    <div id="digital-decoy-interface" class="decoy-overlay hidden">
+        <div class="meeting-header">
+            <span class="meeting-title">Project Q2 Status Call (14 participants)</span>
+            <span class="meeting-live-badge">REC ● LIVE</span>
+        </div>
+        <div class="meeting-grid">
+            <!-- Fake Colleague Cell -->
+            <div class="participant-cell">
+                <div class="participant-video-placeholder" style="background-image: url('https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=1000');"></div>
+                <div class="participant-name">David (Manager) 🎙️</div>
+                <div style="position: absolute; top: 10px; right: 10px; color: #4cd964; font-size: 0.7rem;">Speaking...</div>
+            </div>
+            <!-- User Self-View Cell (Actually shows camera if allowed) -->
+            <div class="participant-cell">
+                <video id="decoy-self-view" autoplay muted playsinline style="width: 100%; height: 100%; object-fit: cover; background: #000;"></video>
+                <div class="participant-name">You (Mobile)</div>
+            </div>
+        </div>
+        <div class="meeting-controls">
+            <div class="control-btn">🔇</div>
+            <div class="control-btn">📹</div>
+            <div class="control-btn">💬</div>
+            <div class="control-btn leave" onclick="exitDigitalDecoy()">Leave</div>
+        </div>
+    </div>
+
     <!-- Firebase SDK (v9 compatibility mode) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
-    <script src="app.js"></script>
+    <!-- Cache-busting script load -->
+    <script src="app.js?v=2.1"></script>
 </body>
 
 </html>

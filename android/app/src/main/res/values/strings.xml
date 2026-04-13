@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SafeHer</string>
+    <string name="title_activity_main">SafeHer</string>
+    <string name="package_name">com.safeher.app</string>
+    <string name="custom_url_scheme">com.safeher.app</string>
+</resources>

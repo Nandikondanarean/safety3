@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🚨 LIVE LOCATION — SafeHer Emergency</title>
+  <meta name="description" content="Live emergency location tracking — SafeHer">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0010;
+      color: #f5f0ff;
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── TOP ALERT BAR ── */
+    .alert-bar {
+      background: linear-gradient(90deg, #ff006e, #c77dff, #ff006e);
+      background-size: 200% 100%;
+      animation: shimmer 2s linear infinite;
+      padding: 12px 20px;
+      text-align: center;
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .pulse-dot {
+      width: 12px; height: 12px;
+      background: #fff;
+      border-radius: 50%;
+      animation: pulse 1s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes shimmer { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+    @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }
+
+    /* ── HEADER ── */
+    .header {
+      background: linear-gradient(135deg, rgba(30,0,50,0.98) 0%, rgba(15,0,30,0.98) 100%);
+      border-bottom: 1px solid rgba(255,0,110,0.25);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .header-brand {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .shield-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, #ff006e, #c77dff);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+    .brand-name {
+      font-family: 'Orbitron', monospace;
+      font-size: 1.1rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, #ff006e, #c77dff);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-sub { font-size: 0.72rem; color: rgba(245,240,255,0.45); letter-spacing: 0.05em; }
+
+    .live-badge {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,0,110,0.12);
+      border: 1px solid rgba(255,0,110,0.35);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.8rem; font-weight: 600;
+      color: #ff85a1;
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      background: #ff006e;
+      border-radius: 50%;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    /* ── MAIN ── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 16px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* ── INFO CARDS ── */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .info-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,133,161,0.15);
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .info-card-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(245,240,255,0.4);
+      margin-bottom: 6px;
+    }
+    .info-card-value {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #f5f0ff;
+      word-break: break-all;
+    }
+    .info-card-value.coords {
+      font-family: monospace;
+      font-size: 0.95rem;
+      color: #00f5d4;
+    }
+    .info-card-value.accuracy { color: #ffbe0b; }
+    .info-card-value.updated { color: #c77dff; }
+
+    /* ── MAP ── */
+    .map-wrapper {
+      position: relative;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 2px solid rgba(255,0,110,0.3);
+      background: rgba(255,255,255,0.02);
+      flex: 1;
+      min-height: 360px;
+    }
+    .map-wrapper iframe {
+      width: 100%; height: 100%;
+      min-height: 360px;
+      border: none;
+      display: block;
+    }
+    .map-overlay-badge {
+      position: absolute;
+      top: 12px; left: 12px;
+      background: rgba(10,0,16,0.85);
+      border: 1px solid rgba(255,0,110,0.4);
+      border-radius: 10px;
+      padding: 6px 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #ff85a1;
+      display: flex; align-items: center; gap: 6px;
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+    }
+    .map-no-location {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      min-height: 360px;
+      gap: 12px;
+      color: rgba(245,240,255,0.4);
+    }
+    .map-no-location .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,0,110,0.15);
+      border-top-color: #ff006e;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ACTIONS ── */
+    .action-row {
+      display: flex; gap: 12px; flex-wrap: wrap;
+    }
+    .btn-action {
+      flex: 1; min-width: 140px;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-maps {
+      background: linear-gradient(135deg, #ff006e, #c77dff);
+      color: #fff;
+    }
+    .btn-maps:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(255,0,110,0.35); }
+    .btn-call {
+      background: rgba(0,245,212,0.1);
+      border: 1px solid rgba(0,245,212,0.35);
+      color: #00f5d4;
+    }
+    .btn-call:hover { background: rgba(0,245,212,0.18); }
+
+    /* ── STATUS BAR ── */
+    .status-bar {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: rgba(245,240,255,0.55);
+    }
+    .status-dot-green {
+      width: 8px; height: 8px;
+      background: #00f5d4;
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    /* ── EXPIRED ── */
+    .expired-banner {
+      background: rgba(251,86,7,0.1);
+      border: 1px solid rgba(251,86,7,0.3);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      color: #fb5607;
+      display: none;
+    }
+
+    @media (max-width: 480px) {
+      .header { padding: 12px 16px; }
+      .main { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Alert Bar -->
+  <div class="alert-bar">
+    <div class="pulse-dot"></div>
+    🚨 EMERGENCY — LIVE LOCATION TRACKING ACTIVE
+    <div class="pulse-dot"></div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-brand">
+      <div class="shield-icon">♀</div>
+      <div>
+        <div class="brand-name">SafeHer</div>
+        <div class="brand-sub">Emergency Response System</div>
+      </div>
+    </div>
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      LIVE
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Info Cards -->
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-card-label">📍 Latitude</div>
+        <div class="info-card-value coords" id="disp-lat">Waiting for GPS...</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">📍 Longitude</div>
+        <div class="info-card-value coords" id="disp-lng">Waiting for GPS...</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">📐 GPS Accuracy</div>
+        <div class="info-card-value accuracy" id="disp-accuracy">—</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">🕐 Last Updated</div>
+        <div class="info-card-value updated" id="disp-time">—</div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="map-wrapper" id="map-wrapper">
+      <div class="map-no-location" id="map-placeholder">
+        <div class="spinner"></div>
+        <p>Waiting for live location...</p>
+        <span style="font-size:0.75rem;">This page refreshes automatically</span>
+      </div>
+      <iframe id="map-frame" src="" style="display:none;"></iframe>
+      <div class="map-overlay-badge" id="map-badge" style="display:none;">
+        <div class="live-dot"></div>
+        Live GPS
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="action-row" id="action-row" style="display:none;">
+      <a id="gmaps-link" href="#" target="_blank" class="btn-action btn-maps">
+        🗺️ Open in Google Maps
+      </a>
+      <a href="tel:112" class="btn-action btn-call">
+        📞 Call Emergency (112)
+      </a>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <div class="status-dot-green"></div>
+      <span id="status-msg">Connecting to emergency session... Refreshing every 5 seconds.</span>
+    </div>
+
+    <!-- Expired -->
+    <div class="expired-banner" id="expired-banner">
+      ⚠️ This tracking session has expired or is no longer active.
+      The emergency may have been resolved.
+    </div>
+
+  </div>
+
+  <script>
+    // AUTO-DETECT API BASE URL
+    const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? '' 
+        : 'https://safeher-j94l.onrender.com';
+
+    // Extract session ID from URL: /track/SESSION_ID OR ?id=SESSION_ID
+    const urlParams = new URLSearchParams(window.location.search);
+    let sessionId = urlParams.get('id');
+    
+    if (!sessionId) {
+      const parts = window.location.pathname.split('/');
+      sessionId = parts[parts.length - 1];
+    }
+
+    let lastCoords = null;
+    let pollCount = 0;
+
+    async function fetchLocation() {
+      if (!sessionId) {
+        document.getElementById('status-msg').textContent = 'Invalid tracking link.';
+        return;
+      }
+      try {
+        const res = await fetch(`https://safeher-y3d3.onrender.com/api/track/${sessionId}`);
+        if (!res.ok) throw new Error('Session not found');
+        const data = await res.json();
+
+        if (data.expired) {
+          document.getElementById('expired-banner').style.display = 'block';
+          document.getElementById('status-msg').textContent = 'Session expired.';
+          return;
+        }
+
+        if (data.lat && data.lng) {
+          // Update info cards
+          document.getElementById('disp-lat').textContent = Number(data.lat).toFixed(7);
+          document.getElementById('disp-lng').textContent = Number(data.lng).toFixed(7);
+          document.getElementById('disp-accuracy').textContent = data.accuracy ? `±${Math.round(data.accuracy)}m` : '—';
+          document.getElementById('disp-time').textContent = data.updatedAt
+            ? new Date(data.updatedAt).toLocaleTimeString('en-IN')
+            : '—';
+
+          // Update map
+          if (!lastCoords || lastCoords.lat !== data.lat || lastCoords.lng !== data.lng) {
+            const mapUrl = `https://maps.google.com/maps?q=${data.lat},${data.lng}&z=16&output=embed`;
+            const frame = document.getElementById('map-frame');
+            frame.src = mapUrl;
+            frame.style.display = 'block';
+            document.getElementById('map-placeholder').style.display = 'none';
+            document.getElementById('map-badge').style.display = 'flex';
+            lastCoords = { lat: data.lat, lng: data.lng };
+          }
+
+          // Update actions
+          const gmapsHref = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
+          document.getElementById('gmaps-link').href = gmapsHref;
+          document.getElementById('action-row').style.display = 'flex';
+
+          pollCount++;
+          document.getElementById('status-msg').textContent =
+            `🔴 LIVE — Refreshing every 5s | Last fix: ${new Date(data.updatedAt || Date.now()).toLocaleTimeString('en-IN')} | Updates received: ${pollCount}`;
+        } else {
+          document.getElementById('status-msg').textContent = 'Waiting for GPS signal from device...';
+        }
+      } catch (err) {
+        document.getElementById('status-msg').textContent = 'Connection error — retrying...';
+      }
+    }
+
+    // Poll every 5 seconds
+    fetchLocation();
+    setInterval(fetchLocation, 5000);
+  </script>
+</body>
+</html>

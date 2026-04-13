@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+Dockerfile
+.dockerignore
+.git
+.env
+.firebase
+android
+ios
+firebase-key.json
+*.md

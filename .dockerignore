@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+Dockerfile
+.dockerignore
+.git
+.github
+.env
+.capacitor
+android
+ios
+public/node_modules
+*.md

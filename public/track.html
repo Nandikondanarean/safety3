@@ -300,6 +300,20 @@
       </div>
     </div>
 
+    <!-- Live Video Evidence -->
+    <div class="map-wrapper" style="margin-bottom: 16px; min-height: 250px; background: #000; display: flex; align-items: center; justify-content: center; position: relative; border-color: #00f5d4;">
+        <div id="remote-video-container" style="width: 100%; height: 100%; position: absolute; top:0; left:0;">
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: rgba(255,255,255,0.4);">
+                <div class="spinner" style="border-top-color: #00f5d4; margin-bottom: 10px;"></div>
+                <p id="video-status">Waiting for user to start broadcast...</p>
+            </div>
+        </div>
+        <div class="map-overlay-badge" style="top: auto; bottom: 12px; border-color: #00f5d4; color: #00f5d4;">
+            <div class="live-dot" style="background: #00f5d4;"></div>
+            LIVE EVIDENCE
+        </div>
+    </div>
+
     <!-- Map -->
     <div class="map-wrapper" id="map-wrapper">
       <div class="map-no-location" id="map-placeholder">
@@ -338,6 +352,42 @@
 
   </div>
 
+  </div>
+  
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
+  <script>
+    // ─── AGORA LIVE VIDEO RECEIVER ───
+    const AGORA_APP_ID = "7a9462cb714f465a8d814c81abc8da6c";
+    let agoraClient = null;
+
+    async function joinVideoLive(channelName) {
+      if (!channelName || AGORA_APP_ID === "YOUR_AGORA_APP_ID_HERE") return;
+      
+      try {
+        agoraClient = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        
+        agoraClient.on("user-published", async (user, mediaType) => {
+          await agoraClient.subscribe(user, mediaType);
+          if (mediaType === "video") {
+            const remoteVideoTrack = user.videoTrack;
+            const remotePlayerContainer = document.getElementById('remote-video-container');
+            remotePlayerContainer.innerHTML = ''; // Clear spinner
+            remoteVideoTrack.play('remote-video-container');
+            document.getElementById('video-status').textContent = "🔴 LIVE EVIDENCE STREAMING";
+          }
+          if (mediaType === "audio") {
+            user.audioTrack.play();
+          }
+        });
+
+        await agoraClient.join(AGORA_APP_ID, channelName, null, null);
+        console.log("Joined video channel:", channelName);
+      } catch (e) {
+        console.error("Agora join error:", e);
+      }
+    }
+  </script>
+
   <script>
     // AUTO-DETECT API BASE URL
     const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
@@ -373,6 +423,11 @@
         }
 
         if (data.lat && data.lng) {
+          // Join Video Stream if not already joined
+          if (data.agoraChannel && !agoraClient) {
+            joinVideoLive(data.agoraChannel);
+          }
+
           // Update info cards
           document.getElementById('disp-lat').textContent = Number(data.lat).toFixed(7);
           document.getElementById('disp-lng').textContent = Number(data.lng).toFixed(7);
